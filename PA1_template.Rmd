@@ -1,25 +1,240 @@
 ---
 title: "Reproducible Research: Peer Assessment 1"
-output: 
+author: "Anthony DiFiore"
+date: "`r Sys.Date()`"
+output:
   html_document:
     keep_md: true
+    toc: true              
+    toc_depth: 2           
+    toc_float: true        
+    number_sections: true  
+    theme: flatly
 ---
+## Introduction
+It is now possible to collect a large amount of data about personal movement using activity monitoring devices such as a Fitbit, Nike Fuelband, or Jawbone Up. These type of devices are part of the “quantified self” movement – a group of enthusiasts who take measurements about themselves regularly to improve their health, to find patterns in their behavior, or because they are tech geeks. But these data remain under-utilized both because the raw data are hard to obtain and there is a lack of statistical methods and software for processing and interpreting the data.
 
+This assignment makes use of data from a personal activity monitoring device. This device collects data at 5-minute intervals throughout the day. The data consists of two months of data from an anonymous individual collected during the months of October and November 2012 and include the number of steps taken in 5 minute intervals each day.
 
-## Loading and preprocessing the data
+**Data Source:**
+The dataset was provided as part of the [Reproducible Research](https://www.coursera.org/learn/reproducible-research) course by Johns Hopkins University on Coursera. It can be downloaded from the following URL: [activity.zip](https://d396qusza40orc.cloudfront.net/repdata%2Fdata%2Factivity.zip).
 
+**Purpose:**
+This analysis of the dataset aims to explore daily activity patterns, address missing data, and compare activity across weekdays and weekends.
 
+Before we begin, I'm going to use the following code to set up the global environment for my markdown file. This code chunk will load all required libraries and will configure `knitr` options. These steps ensure that my document will be both clean and reproducible.
+```{r setup, include=TRUE}
+knitr::opts_chunk$set(
+  echo = TRUE,        
+  message = FALSE,     
+  warning = FALSE
+)
 
-## What is mean total number of steps taken per day?
+library(ggplot2)
+library(dplyr)
+library(plotly)
+library(hrbrthemes)
+```
 
+## Loading and Preprocessing the Data
 
+This code imports and preprocesses the activity dataset. It reads the CSV file into `activity_data`, converts the `date` column to the `Date` class, and then uses `str()` and `summary()` to confirm the structure and basic statistics of the data. This step ensures the dataset is properly formatted and ready for further analysis: 
+```{r}
+activity_data <- read.csv("activity.csv", stringsAsFactors = FALSE)
+activity_data$date <- as.Date(activity_data$date, format = "%Y-%m-%d")
 
-## What is the average daily activity pattern?
+str(activity_data)
+summary(activity_data)
+```
 
+The `str()` and `summary()` functions provide a structural overview and summary statistics of the dataset, helping us make initial observations. First, we notice a significant number of missing values (`NA`s), which we will address in a later step to ensure the integrity of our analysis. Second, the dataset charts daily steps across time intervals, offering insight into when people are most active during the day and week. These observations lay the foundation for exploring activity patterns and identifying peak intervals in the next steps.
 
+## What is the Mean Total Number of Steps Taken Per Day?
 
-## Imputing missing values
+This code aggregates total steps by date using `aggregate()` and removes missing values. The resulting `daily_steps` dataset contains one row per day, with a sum of all steps taken that day. Converting date to a factor supports categorical analysis and plotting by day.
+```{r}
+daily_steps <- aggregate(steps ~ date, data = activity_data, FUN = sum, na.rm = TRUE)
+daily_steps <- daily_steps %>% mutate(date = factor(date))
+```
 
+In this next section, we create a histogram to visualize the total number of steps taken each day. The data is grouped into bins of 2,500 steps, and each bar is colored based on the specific day. I want the chart to be clear and easy to read, and so I set the y-axis to show a maximum of 20 days.  This visualization provides a quick overview of the distribution of daily total steps: 
+```{r}
+ggplot(daily_steps, aes(x = steps, fill = date)) +
+  geom_histogram(breaks = seq(0, 25000, by = 2500), show.legend = FALSE) + 
+  ylim(0, 20) + 
+  labs(title = "Distribution of Daily Step Counts Over Two Months.", 
+       x = "Total Steps Taken", y = "Number of Days")
+```
 
+In this part, we calculate the average (`mean`) and the middle value (`median`) of the total steps taken each day using the `daily_steps` dataset. These numbers help us understand the typical daily activity levels by summarizing the central trend of the data: 
+```{r}
+mean_steps <- mean(daily_steps$steps)
+median_steps <- median(daily_steps$steps)
+mean_steps
+median_steps
+```
 
-## Are there differences in activity patterns between weekdays and weekends?
+This finding indicates that the individual’s activity peaks in the morning, likely reflecting a consistent routine.
+
+## What is the Average Daily Activity Pattern?
+
+This code calculates the average steps per interval across all days and identifies the interval with the highest mean steps. These results help pinpoint when daily activity tends to peak.
+```{r}
+interval_steps <- aggregate(steps ~ interval, data = activity_data, FUN = mean, na.rm = TRUE)
+max_interval <- interval_steps[which.max(interval_steps$steps), "interval"]
+```
+
+These steps convert numeric intervals into a time-of-day format (HH:MM) by zero-padding the interval values, extracting hours and minutes, and constructing a `POSIXct` datetime. This enables the plotting of intervals as actual times. The maximum interval is similarly processed to produce a human-readable `time_label` for annotations in later visualizations.
+```{r}
+interval_padded <- sprintf("%04d", interval_steps$interval)
+hours <- as.integer(substr(interval_padded, 1, 2))
+minutes <- as.integer(substr(interval_padded, 3, 4))
+
+interval_steps$time_of_day <- as.POSIXct(
+  sprintf("1970-01-01 %02d:%02d:00", hours, minutes),
+  format = "%Y-%m-%d %H:%M:%S", tz = "GMT"
+)
+
+max_interval_str <- sprintf("%04d", max_interval)
+max_hour <- as.integer(substr(max_interval_str, 1, 2))
+max_minute <- as.integer(substr(max_interval_str, 3, 4))
+max_time <- as.POSIXct(sprintf("1970-01-01 %02d:%02d:00", max_hour, max_minute),
+                       format = "%Y-%m-%d %H:%M:%S", tz = "GMT")
+time_label <- paste0(max_hour, ":", sprintf("%02d", max_minute))
+```
+
+Prior to plotting this data, I want to calculate the overall mean steps across all intervals, providing a baseline reference that can be uses in the next step for annotating the plot: 
+```{r}
+mean_steps_value <- mean(interval_steps$steps)
+```
+
+Next, in order to visualize the data and to try and make sense of any average daily step patterns, I created a time-series graph that shows the average number of steps taken at different times of the day. The graph highlights the specific time interval with the highest average steps using both text and a red point marker. I chose to add a horizontal blue line to represent the overall average number of steps across all intervals. Additionally, I customized the appearance of the plot with a clean theme, used vibrant colors to enhance clarity and visual appeal, and set the x-axis to display time in 4-hour increments.
+```{r}
+p <- interval_steps %>%
+  ggplot(aes(x = time_of_day, y = steps)) +
+  geom_line(color = "#dd00f9", size = 0.5) +  
+  annotate("text", x = max_time, y = max(interval_steps$steps) + 5, 
+           label = paste("Max interval:", time_label),
+           color = "black") +
+  annotate("point", x = max_time, y = max(interval_steps$steps),
+           size = 3, shape = 21, fill = "transparent", color = "red") +
+  geom_hline(yintercept = mean_steps_value, color = "#0099f9", size = 0.75) +
+  labs(title = "Average Number of Steps per Time of Day",
+       x = "Time of Day",
+       y = "Average Number of Steps") +
+  theme_ipsum(base_size = 14) +
+  theme(
+    plot.title = element_text(color = "#0099f9", size = 16, face = "bold"),
+    axis.text = element_text(color = "black"),
+    axis.title = element_text(color = "black"),
+    plot.background = element_rect(fill = "white", color = NA),
+    panel.background = element_rect(fill = "white", color = NA)
+  ) +
+  scale_x_datetime(date_breaks = "4 hours", date_labels = "%H:%M", expand = c(0,0))
+```
+
+Finally, in order to make the plot more dynamic and to allow for users to more deeply explore the data, I transformed the static plot `p` created with `ggplot2` into an interactive visualization using Plotly's `ggplotly()` function. This modification allows users to engage with the plot through features like tooltips, zooming, and panning.
+```{r}
+fig <- ggplotly(p)
+fig
+```
+
+## Imputing Missing Values
+
+In the original dataset, there are a number of days/intervals where there are missing values (coded as `NA`). My goal here is to calculate and report the total number of missing values in the dataset (i.e. the total number of rows with `NA`s), and then to devise a strategy for filling in all of the missing values. I begin by using the following code to first check each entry in the steps column for `NA`, and then to create a lookup vector `interval_mean_map` that associates each interval with its average number of steps. This new vector that I've created simplifies the process of filling in missing steps values (`NA`) by providing a straightforward way to replace them with the average steps for each specific interval.
+```{r}
+total_na <- sum(is.na(activity_data$steps))
+total_na
+
+interval_mean_map <- setNames(interval_steps$steps, interval_steps$interval)
+```
+
+The next step is to create a copy of `activity_data` named `imputed_data`, which identifies which `steps` entries are `NA`, and assigns each missing value the average steps from `interval_mean_map` based on the interval. This imputation ensures that the dataset is complete, allowing for accurate subsequent analyses without the bias that could result from missing data.
+```{r}
+imputed_data <- activity_data
+missing_indices <- is.na(imputed_data$steps)
+imputed_data$steps[missing_indices] <- interval_mean_map[as.character(imputed_data$interval[missing_indices])]
+```
+
+My next step was to calculate the total number of steps taken each day by summing up all the steps across every interval for each date, and then to create a histogram in order to visualize how these daily steps are distributed. After experimenting with different plot dimensions, I decided to use a bin width of 1,000 steps, and limited the y-axis to 20, so that the plot would more clearly and effectively show the number of days that fall into each step range.
+```{r}
+daily_steps_imputed <- aggregate(steps ~ date, data = imputed_data, FUN = sum)
+
+daily_steps_imputed <- daily_steps_imputed |>
+  mutate(date = factor(date))
+
+ggplot(daily_steps_imputed, aes(x = steps, fill = date)) +
+  geom_histogram(breaks = seq(0,25000, by = 1000), show.legend = FALSE) + 
+  ylim(0, 20) + 
+  labs(title = "Total Steps per Day (Imputed Data)", x = "Total Steps", y = "Count of Days")
+```
+
+Next, let's calculate the mean and median of the total daily steps using the imputed dataset, to see if both values undergo a significant change since we first observed the values in Step 2:
+```{r}
+mean_steps_imputed <- mean(daily_steps_imputed$steps)
+median_steps_imputed <- median(daily_steps_imputed$steps)
+
+mean_steps_imputed
+median_steps_imputed
+```
+
+As you can see, this method for handling missing step counts involved replacing each missing value with the average number of steps for that specific time period. This approach ensured that the overall daily average and median step counts remained the same as in our original analysis. By using representative values for each time interval, we maintained the consistency and reliability of our results. This demonstrates the importance of careful data handling in preserving the accuracy of our findings.
+
+## Are There Differences in Activity Patterns Between Weekdays and Weekends?
+Here, we categorize each day as either a “weekday” or a “weekend”. I used the `weekdays()` function to determine the day of the week for each date. If the day is Saturday or Sunday, it’s labeled as “weekend”; otherwise, it’s labeled as “weekday”. Next, I converted the `day_type` column to a factor with the levels ordered as “weekday” and “weekend” to ensure consistent plotting and analysis in later steps.
+```{r}
+imputed_data$day_type <- ifelse(weekdays(imputed_data$date) %in% c("Saturday","Sunday"),
+                                "weekend", "weekday")
+imputed_data$day_type <- factor(imputed_data$day_type, levels = c("weekday", "weekend"))
+```
+
+The next step is to calculate the average number of steps taken during each time interval, distinguishing between weekdays and weekends. I chose the base R function `aggregate()` to group the data by both interval and day type, then compute the average steps for each group. After that, we convert the interval numbers into a standard time format by adding leading zeros and extracting the hour and minute components. This transformation allows us to plot the data on a continuous time axis, making it easier to compare activity patterns between weekdays and weekends.
+```{r}
+interval_daytype <- aggregate(steps ~ interval + day_type, data = imputed_data, FUN = mean)
+
+interval_padded <- sprintf("%04d", interval_daytype$interval)
+hours <- as.integer(substr(interval_padded, 1, 2))
+minutes <- as.integer(substr(interval_padded, 3, 4))
+
+interval_daytype$time_of_day <- as.POSIXct(
+  sprintf("1970-01-01 %02d:%02d:00", hours, minutes),
+  format = "%Y-%m-%d %H:%M:%S", tz = "GMT"
+)
+```
+
+This code plots the average number of steps taken throughout the day, comparing patterns between weekdays and weekends. It maps `time_of_day` to the x-axis and steps to the y-axis, with line colors distinguishing between “weekday” and “weekend” activities. The plot is divided into separate panels for weekdays and weekends using `facet_wrap`, facilitating an easy comparison of activity trends. The x-axis is formatted to display military time in 4-hour intervals for clarity. Custom colors (#FF5733 for weekdays and #00BFFF for weekends) enhance visual distinction, and the `theme_minimal` provides a clean, professional look. Additional theme adjustments ensure that titles and labels are bold and colored appropriately, while removing the legend keeps the focus on the faceted comparisons.
+```{r}
+ggplot(interval_daytype, aes(x = time_of_day, y = steps, color = day_type)) +
+  geom_line(size = 1.2) +
+  facet_wrap(~ day_type, ncol = 1) +
+  scale_x_datetime(date_breaks = "4 hours", date_labels = "%H:%M", expand = c(0,0)) +
+  scale_color_manual(values = c("weekday" = "#FF5733",    
+                                "weekend" = "#00BFFF")) + 
+  labs(title = "Avg. Steps by Time of Day for Weekdays vs. Weekends",
+       x = "Time of Day",
+       y = "Average Number of Steps") +
+  theme_minimal(base_size = 14) +
+  theme(
+    plot.title = element_text(face = "bold", size = 16, color = "#0099f9"),
+    strip.text = element_text(face = "bold", size = 14, color = "black"),
+    axis.title = element_text(color = "black", face = "bold"),
+    axis.text = element_text(color = "black"),
+    panel.grid.minor = element_blank(), 
+    panel.grid.major = element_line(color = "gray80"),
+    legend.position = "none"
+  )
+```
+
+When comparing the average number of steps taken throughout the day, clear differences emerge between weekdays and weekends. On weekdays, there’s a noticeable increase in activity during the morning and evening hours, likely reflecting the routines of getting ready for work or school and winding down afterward. In the middle of the day, activity levels tend to drop, possibly due to periods of sedentary work or study. Conversely, weekends exhibit a more balanced and steady level of activity throughout the day, without the sharp peaks seen on weekdays. This suggests that weekends offer a more relaxed schedule, allowing for consistent movement and a variety of activities without the structured demands of weekday routines.
+
+## Conclusion
+In conclusion, this analysis demonstrated the importance of addressing missing data to ensure accurate results. By examining daily and interval-level activity, we uncovered distinct patterns, such as higher activity peaks during weekdays compared to more evenly distributed activity on weekends. These findings offer insights into daily routines and the role of structured schedules in physical activity.
+
+This R Markdown document follows reproducible research principles by providing clear and well-documented code for each analytical step, including data loading, preprocessing, visualization, and interpretation. The organized sections are designed to support replication and verification of the results.
+
+## References
+	- Wickham, H. (2016). ggplot2: Elegant Graphics for Data Analysis. Springer-Verlag New York.
+	- Hadley Wickham, Romain François, Lionel Henry, and Kirill Müller (2023). dplyr: A Grammar of Data Manipulation. R package version 1.1.2.
+	- Carson Sievert and Hadley Wickham (2023). plotly: Create Interactive Web Graphics via ‘plotly.js’. R package version 4.10.0.
+	- Jeroen Ooms (2022). hrbrthemes: Extra Themes, Theme Components and Utilities for ‘ggplot2’. R package version 0.8.0.
+	- Xie, Y. (2015). knitr: A General-Purpose Package for Dynamic Report Generation in R. R package version 1.22.
